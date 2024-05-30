@@ -1,0 +1,118 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Create Config Rule to evaluate if a bucket has an S3 Lifecycle policy and if not auto remediate. 
+
+Resources:    
+  RemediationForConfigRule:
+    Type: 'AWS::Config::RemediationConfiguration'
+    Properties:
+        Automatic: true
+        ConfigRuleName: !ImportValue ConfigRule
+        MaximumAutomaticAttempts: 5
+        RetryAttemptSeconds: 60
+        TargetId: !Ref ConfigDocument
+        TargetType: SSM_DOCUMENT
+        TargetVersion: '1'
+        ResourceType: AWS::S3::Bucket
+        Parameters:
+          AutomationAssumeRole:
+                StaticValue:
+                  Values:
+                    - 'Fn::GetAtt':
+                        - iamRemediationRole
+                        - Arn
+          S3Bucket:
+                ResourceValue:
+                    Value: RESOURCE_ID
+  iamRemediationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - 'ssm.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - Fn::Join:
+            - ""
+            - - "arn:"
+              - Ref: AWS::Partition
+              - :iam::aws:policy/service-role/AmazonSSMAutomationRole
+      Policies:
+        - PolicyName: 'AllowIamAutomationPolicyRemediation'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+            - Effect: Allow
+              Action: 
+                - "s3:GetLifecycleConfiguration"
+                - "s3:ListAllMyBuckets"
+                - "s3:PutLifecycleConfiguration"
+                - "config:ListDiscoveredResources"
+              Resource: "*"
+          
+  ConfigDocument: 
+    Type: AWS::SSM::Document
+    Properties:
+      Name: 'S3-impu-config-remediation1'
+      DocumentType: Automation
+      Content:
+        description: |-
+          # This will add an S3 Lifecycle config for IMPU when they are flagged as non compliant in AWS Config
+        schemaVersion: '0.3'
+        assumeRole: 
+          Fn::GetAtt:
+          - iamRemediationRole
+          - Arn
+        parameters:
+          S3Bucket:
+            type: String
+            description: This will add an S3 Lifecycle config for IMPU when they are flagged as non compliant in AWS Config
+            default: ''
+          AutomationAssumeRole:
+            type: String
+            description: AutomationAssumeRole 
+            default: ''
+        mainSteps:
+        - name: S3_LifeCycle_Policy_Add
+          action: aws:executeScript
+          inputs:
+            Runtime: python3.10
+            Handler: script_handler
+            InputPayload:
+              S3Bucket: '{{S3Bucket}}'
+              AutomationAssumeRole: '{{AutomationAssumeRole}}'
+            Script: |-
+                import boto3
+
+                def script_handler(events, context):
+                    s3 = boto3.client('s3')
+                    try:
+                      policy = {
+                                "Rules": [
+                                    {
+                                        "ID": "IMPU Config Remediation Policy",
+                                        "Status": "Enabled",
+                                        "Filter": {
+                                            "Prefix": ""
+                                        },
+                                        "AbortIncompleteMultipartUpload": {
+                                            "DaysAfterInitiation": 7
+                                        }
+                                    }
+                                ]
+                            }
+                      s3.put_bucket_lifecycle_configuration(Bucket=events['S3Bucket'], LifecycleConfiguration=policy)
+                    except Exception as e:
+                      # Send some context about this error to Lambda Logs
+                      print(e)
+                      
+                    
+
+            
+     

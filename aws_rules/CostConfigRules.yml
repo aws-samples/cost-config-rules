@@ -1,0 +1,378 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ''
+Resources:
+  EIPConfigRule:
+    Type: 'AWS::Config::ConfigRule'
+    Properties:
+      ConfigRuleName: eip-attached-rule
+      Description: >-
+        Auto remediation configuration to release unattached Elastic IPs.
+        Detection uses a managed AWS Config Rule and remediation is with SSM
+        Automation.
+      Scope:
+        ComplianceResourceTypes:
+          - 'AWS::EC2::EIP'
+      Source:
+        Owner: AWS
+        SourceIdentifier: EIP_ATTACHED
+  EBSConfigRule:
+    Type: 'AWS::Config::ConfigRule'
+    Properties:
+      ConfigRuleName: ec2-volume-inuse-check
+      Description: >-
+        A Config rule that checks whether EBS volumes are attached to EC2
+        instances. Optionally checks if EBS volumes are marked for deletion when
+        an instance is terminated.
+      Scope:
+        ComplianceResourceTypes:
+          - 'AWS::EC2::Volume'
+      Source:
+        Owner: AWS
+        SourceIdentifier: EC2_VOLUME_INUSE_CHECK
+  ELBConfigRule:
+    Type: 'AWS::Config::ConfigRule'
+    Properties:
+      ConfigRuleName: elb-instance-check
+      Description: >-
+        A Config rule that checks whether ELBs are attached to EC2
+        instances.
+      Scope:
+        ComplianceResourceTypes:
+          - 'AWS::ElasticLoadBalancing::LoadBalancer'
+      Source:
+        Owner: CUSTOM_LAMBDA
+        SourceIdentifier: !GetAtt [ELBLambdaFunction, Arn]
+        SourceDetails:
+          - EventSource: aws.config
+            MaximumExecutionFrequency: TwentyFour_Hours
+            MessageType: ScheduledNotification
+  RemediationForEIPConfigRule:
+    Type: 'AWS::Config::RemediationConfiguration'
+    Properties:
+      Automatic: true
+      ConfigRuleName:
+        Ref: EIPConfigRule
+      MaximumAutomaticAttempts: 5
+      RetryAttemptSeconds: 60
+      TargetId: AWS-ReleaseElasticIP
+      TargetType: SSM_DOCUMENT
+      TargetVersion: '1'
+      Parameters:
+        AutomationAssumeRole:
+          StaticValue:
+            Values:
+              - 'Fn::GetAtt':
+                  - AutoRemediationIamRole
+                  - Arn
+        AllocationId:
+          ResourceValue:
+            Value: RESOURCE_ID
+  RemediationForELBConfigRule:
+    Type: 'AWS::Config::RemediationConfiguration'
+    Properties:
+      Automatic: true
+      ConfigRuleName:
+        Ref: ELBConfigRule
+      MaximumAutomaticAttempts: 5
+      RetryAttemptSeconds: 60
+      TargetId: ELB_Config_Tag
+      TargetType: SSM_DOCUMENT
+      TargetVersion: '1'
+      Parameters:
+        AutomationAssumeRole:
+          StaticValue:
+            Values:
+              - 'Fn::GetAtt':
+                  - AutoRemediationIamRole
+                  - Arn
+        ELBNAME:
+          ResourceValue:
+            Value: RESOURCE_ID
+  AutoRemediationIamRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+                - events.amazonaws.com
+                - ssm.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonSSMAutomationRole'
+      Policies:
+        - PolicyName: ReleaseElasticIPPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReleaseElasticIPPermissions
+                Effect: Allow
+                Action: ['ec2:ReleaseAddress', 'elasticloadbalancing:*']
+                Resource: '*'
+  # AutomationPassRolePolicy:
+  #   Type: 'AWS::IAM::Policy'
+  #   Properties:
+  #     PolicyName: passAutomationRole
+  #     PolicyDocument:
+  #       Version: '2012-10-17'
+  #       Statement:
+  #         - Effect: Allow
+  #           Action:
+  #             - 'iam:PassRole'
+  #           Resource:
+  #             'Fn::GetAtt':
+  #               - AutoRemediationIamRole
+  #               - Arn
+  #     Roles:
+  #       - Ref: AutoRemediationIamRole
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: lambda-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+            - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+              - lambda.amazonaws.com
+              - config.amazonaws.com
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: ["config:Put*",
+                "config:Get*",
+                "config:List*",
+                "config:Describe*",
+                "config:BatchGet*",
+                "config:Select*", 
+                "logs:*", 
+                "elasticloadbalancing:*"]
+                Resource: '*'
+              - Effect: Allow
+                Action: 
+                  - s3:GetBucketNotification
+                  - s3:PutBucketNotification
+                Resource: !Sub 'arn:aws:s3:::{S3BucketName}'    
+      Path: /
+  ELBLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: elb-empty-config-lambda
+      Description: Empty ELB config rule
+      Runtime: python3.8
+      Code:
+        S3Bucket: !Ref S3BucketName
+        S3Key: 'source.py.zip'
+      Handler: 'source.lambda_handler'
+      MemorySize: 128
+      Timeout: 300
+      Role:
+        Fn::GetAtt:
+          - LambdaRole
+          - Arn
+  ELBLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      Principal: config.amazonaws.com
+      FunctionName: !GetAtt ELBLambdaFunction.Arn
+  ELBConfigDocument: 
+    Type: AWS::SSM::Document
+    Properties:
+      Name: 'ELB_Config_Tag'
+      DocumentType: Automation
+      Content:
+        description: |-
+          # This will tag Empty ELBs when they are flagged as non compliant in AWS Config
+        schemaVersion: '0.3'
+        assumeRole: !Sub  'arn:aws:iam::${AWS::AccountId}:role/AutoRemediationIamRole'
+        parameters:
+          ELBNAME:
+            type: String
+            description: The name of the ELB that will be tagged
+          AutomationAssumeRole:
+            type: String
+            description: Role to assume
+        mainSteps:
+        - name: Tag_ELB
+          action: aws:executeScript
+          inputs:
+            Runtime: python3.7
+            Handler: script_handler
+            Script: |-
+              def script_handler(events, context):
+                  import boto3
+                  client = boto3.client('elb')
+                  
+                  LoadBalancerName = events['ELBNAME']
+                  response = client.add_tags(
+                      LoadBalancerNames=[
+                          LoadBalancerName,
+                      ],
+                      Tags=[
+                          {
+                              'Key': 'ConfigUncompliant',
+                              'Value': 'True'
+                          },
+                      ]
+                  )
+                  print(response)
+            InputPayload:
+              ELBNAME: '{{ELBNAME}}'
+     
+  ConfigPartitionLambdaFunction:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName:
+          Fn::Sub: ConfigPartitionLambdaFunction
+        Description: ConfigPartitionLambdaFunction
+        Runtime: python3.8
+        Code:
+            ZipFile: |
+              import datetime
+              import re
+              import boto3
+              import os
+
+              TABLE_NAME = 'aws_config_configuration_snapshot'
+              DATABASE_NAME = os.environ["DATABASE"]
+              ACCOUNT_ID = None # Determined at runtime
+              LATEST_PARTITION_VALUE = 'latest'
+
+              athena = boto3.client('athena')
+
+              def lambda_handler(event, context):
+                  global ACCOUNT_ID
+
+                  object_key = event['Records'][0]['s3']['object']['key']
+                  match = get_configuration_snapshot_object_key_match(object_key)
+                  if match is None:
+                      print('Ignoring event for non-configuration snapshot object key', object_key)
+                      return
+                  print('Adding partitions for configuration snapshot object key', object_key)
+                  
+                  ACCOUNT_ID = context.invoked_function_arn.split(':')[4]
+                  object_key_parent = 's3://{bucket_name}/{object_key_parent}/'.format(
+                      bucket_name=event['Records'][0]['s3']['bucket']['name'],
+                      object_key_parent=os.path.dirname(object_key))
+                  configuration_snapshot_region = get_configuration_snapshot_region(match)
+                  configuration_snapshot_date = get_configuration_snapshot_date(match)
+                  
+                  drop_partition(configuration_snapshot_region, LATEST_PARTITION_VALUE)
+                  add_partition(configuration_snapshot_region, LATEST_PARTITION_VALUE, object_key_parent)
+                  add_partition(configuration_snapshot_region, get_configuration_snapshot_date(match).strftime('%Y-%m-%d'), object_key_parent)
+                  
+              def get_configuration_snapshot_object_key_match(object_key):
+                  # Matches object keys like AWSLogs/123456789012/Config/us-east-1/2018/4/11/ConfigSnapshot/123456789012_Config_us-east-1_ConfigSnapshot_20180411T054711Z_a970aeff-cb3d-4c4e-806b-88fa14702hdb.json.gz
+                  return re.match('^AWSLogs/\d+/Config/([\w-]+)/(\d+)/(\d+)/(\d+)/ConfigSnapshot/[^\\\]+$', object_key)
+
+              def get_configuration_snapshot_region(match):
+                  return match.group(1)
+
+              def get_configuration_snapshot_date(match):
+                  return datetime.date(int(match.group(2)), int(match.group(3)), int(match.group(4)))
+                  
+              def add_partition(region_partition_value, dt_partition_value, partition_location):
+                  execute_query('ALTER TABLE {table_name} ADD PARTITION {partition} location \'{partition_location}\''.format(
+                      table_name=TABLE_NAME,
+                      partition=build_partition_string(region_partition_value, dt_partition_value),
+                      partition_location=partition_location))
+                      
+              def drop_partition(region_partition_value, dt_partition_value):
+                  execute_query('ALTER TABLE {table_name} DROP PARTITION {partition}'.format(
+                      table_name=TABLE_NAME,
+                      partition=build_partition_string(region_partition_value, dt_partition_value)))
+                      
+              def build_partition_string(region_partition_value, dt_partition_value):
+                  return "(dt='{dt_partition_value}', region='{region_partition_value}')".format(
+                      dt_partition_value=dt_partition_value,
+                      region_partition_value=region_partition_value)
+
+              def execute_query(query):
+                  print('Executing query:', query)
+                  query_output_location = 's3://aws-athena-query-results-{account_id}-{region}'.format(
+                      account_id=ACCOUNT_ID,
+                      region=os.environ['AWS_REGION'])
+                  start_query_response = athena.start_query_execution(
+                      QueryString=query,
+                      QueryExecutionContext={
+                          'Database': DATABASE_NAME
+                      },
+                      ResultConfiguration={
+                          'OutputLocation': query_output_location,
+                      }
+                  )
+                  print('Query started')
+                  
+                  is_query_running = True
+                  while is_query_running:
+                      get_query_execution_response = athena.get_query_execution(
+                          QueryExecutionId=start_query_response['QueryExecutionId']
+                      )
+                      query_state = get_query_execution_response['QueryExecution']['Status']['State']
+                      is_query_running = query_state in ('RUNNING','QUEUED')
+                      
+                      if not is_query_running and query_state != 'SUCCEEDED':
+                          raise Exception('Query failed')
+                  print('Query completed')
+
+
+        Handler: 'index.lambda_handler'
+        MemorySize: 128
+        Timeout: 300
+        Role:
+          Fn::GetAtt:
+            - LambdaRole
+            - Arn
+        Environment:
+          Variables:
+            DATABASE: 'sampledb'
+
+  ConfigPartitionLambdaInvokePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !GetAtt ConfigPartitionLambdaFunction.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref 'AWS::AccountId'
+      SourceArn: !Sub 'arn:aws:s3:::{S3BucketName}'      
+
+  
+
+
+Parameters: 
+  S3BucketName:
+    Type: String
+    Default: enableconfig-configbucket-grkr2tklfn53 
+Metadata: {}
+Conditions: {}
+# Outputs:
+#   LambdaRoleARN:
+#     Description: Role for Lambda execution.
+#     Value:
+#       Fn::GetAtt:
+#         - LambdaRole
+#         - Arn
+#     Export:
+#       Name:  LambdaRole
+#   ELBLambdaFunctionName:
+#     Value:
+#       Ref: ELBLambdaFunction
+#   ELBLambdaFunctionARN:
+#     Description: Lambda function ARN.
+#     Value:
+#       Fn::GetAtt:
+#         - ELBLambdaFunction
+#         - Arn
+#     Export:
+#       Name: LambdaARN
