@@ -33,28 +33,29 @@ CONFIG_ROLE_TIMEOUT_SECONDS = 900
 #############
 # Main Code #
 #############
-  #change base control - using the event the bucket name from it 
 
-  
-def evaluate_compliance(event):
+def evaluate_compliance(event, bucketName):
+    
     evaluations = []
     s3 = boto3.client('s3')
-    BucketNames = s3.list_buckets()
-    for bucket in BucketNames['Buckets']:
-        bucketName = bucket['Name']
-        try:
+    #BucketNames = s3.list_buckets()
+    #for bucket in BucketNames['Buckets']:
+    bucketName = bucketName
+    
+    #bucket['Name']
+    try:
+        
+        result = s3.get_bucket_lifecycle_configuration(Bucket=bucketName) 
+        Rules= result['Rules']
+        
+        if any('AbortIncompleteMultipartUpload' in d for d in Rules):
+            evaluations.append( build_evaluation(bucketName, 'COMPLIANT', event))
+        else: 
+            evaluations.append(build_evaluation(bucketName, 'NON_COMPLIANT', event))
             
-            result = s3.get_bucket_lifecycle_configuration(Bucket=bucketName) 
-            Rules= result['Rules']
-            
-            if any('AbortIncompleteMultipartUpload' in d for d in Rules):
-                evaluations.append( build_evaluation(bucketName, 'COMPLIANT', event))
-            else: 
-                evaluations.append(build_evaluation(bucketName, 'NON_COMPLIANT', event))
-                
-        except ClientError as err: 
-            if err.response['Error']['Code'] == 'NoSuchLifecycleConfiguration':
-                evaluations.append(build_evaluation(bucketName, 'NON_COMPLIANT', event))
+    except ClientError as err: 
+        if err.response['Error']['Code'] == 'NoSuchLifecycleConfiguration':
+            evaluations.append(build_evaluation(bucketName, 'NON_COMPLIANT', event))
     return evaluations
 
 
@@ -271,6 +272,10 @@ def clean_up_old_evaluations(latest_evaluations, event):
     return cleaned_evaluations + latest_evaluations
 
 def lambda_handler(event, context):
+    #print(event)
+    print(str(json.loads(event['invokingEvent'])['configurationItem']['configuration']['name']))
+    bucketName = str(json.loads(event['invokingEvent'])['configurationItem']['configuration']['name'])
+    #print(event['invokingEvent']['configurationItem']['configuration']['name'])
     if 'liblogging' in sys.modules:
         liblogging.logEvent(event)
 
@@ -286,7 +291,7 @@ def lambda_handler(event, context):
     try:
         AWS_CONFIG_CLIENT = get_client('config', event)
         if invoking_event['messageType'] in ['ConfigurationItemChangeNotification', 'ScheduledNotification', 'OversizedConfigurationItemChangeNotification']:
-            compliance_result = evaluate_compliance(event)
+            compliance_result = evaluate_compliance(event, bucketName)
                             
         else:
             return build_internal_error_response('Unexpected message type', str(invoking_event))
