@@ -33,9 +33,9 @@ CONFIG_ROLE_TIMEOUT_SECONDS = 900
 #############
 # Main Code #
 #############
-  #change base control - using the event the bucket name from it 
+#change base control - using the event the bucket name from it 
 
-  
+
 def evaluate_compliance(event):
     evaluations = []
     s3 = boto3.client('s3')
@@ -105,7 +105,7 @@ def get_client(service, event):
     return boto3.client(service, aws_access_key_id=credentials['AccessKeyId'],
                         aws_secret_access_key=credentials['SecretAccessKey'],
                         aws_session_token=credentials['SessionToken']
-                      )
+                    )
 
 # This generate an evaluation for config
 def build_evaluation(resource_id, compliance_type, event, resource_type=DEFAULT_RESOURCE_TYPE, annotation=None):
@@ -219,8 +219,8 @@ def get_assume_role_credentials(role_arn):
     sts_client = boto3.client('sts')
     try:
         assume_role_response = sts_client.assume_role(RoleArn=role_arn,
-                                                      RoleSessionName="configLambdaExecution",
-                                                      DurationSeconds=CONFIG_ROLE_TIMEOUT_SECONDS)
+                                                    RoleSessionName="configLambdaExecution",
+                                                    DurationSeconds=CONFIG_ROLE_TIMEOUT_SECONDS)
         if 'liblogging' in sys.modules:
             liblogging.logSession(role_arn, assume_role_response)
         return assume_role_response['Credentials']

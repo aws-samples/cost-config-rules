@@ -476,8 +476,8 @@ Resources:
         - EventSource: aws.config
           MessageType: ScheduledNotification
 Outputs:
-    ConfigRule:
+    ConfigRule24:
         Description: The name of the config rule
         Value: !Ref ConfigRuleForS3IMPU   
         Export:
-            Name: ConfigRule
+            Name: ConfigRule24
