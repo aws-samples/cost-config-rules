@@ -7,7 +7,7 @@ Resources:
     Type: 'AWS::Config::RemediationConfiguration'
     Properties:
         Automatic: true
-        ConfigRuleName: !ImportValue ConfigRule
+        ConfigRuleName: !ImportValue ConfigRuleChange
         MaximumAutomaticAttempts: 5
         RetryAttemptSeconds: 60
         TargetId: !Ref ConfigDocument
@@ -59,7 +59,7 @@ Resources:
   ConfigDocument: 
     Type: AWS::SSM::Document
     Properties:
-      Name: 'S3-impu-config-remediation1'
+      Name: 'S3-impu-config-remediation'
       DocumentType: Automation
       Content:
         description: |-
