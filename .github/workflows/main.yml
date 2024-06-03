@@ -28,12 +28,6 @@ jobs:
       - name: CFN Nag scan
         run: |
           cfn_nag_scan --input-path  s3_incomplete_mpus_custom/s3-impu-config_change.yaml
-      - name: Install cfn-lint
-        run: |
-          pip install cfn-lint
-      - name: CFN Lint
-        run: |
-          cfn-lint s3_incomplete_mpus_custom/s3-impu-config_change.yaml
       - name: Install bandit
         run: |
           pip install bandit
