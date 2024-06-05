@@ -32,6 +32,11 @@ https://docs.aws.amazon.com/controltower/latest/controlreference/s3-rules.html#c
 
 * ec2-volume-inuse-check - A Config rule that checks whether EBS volumes are attached to EC2 instances. Optionally checks if EBS volumes are marked for deletion when an instance is terminated.
 
+* desired-instance-type - Checks if your EC2 instances are of a specific instance type. The rule is NON_COMPLIANT if an EC2 instance is not specified in the parameter list. For a list of supported EC2 instance types, see Instance types in the EC2 User Guide for Linux Instances.
+
+* cloudwatch-alarm-action-check - Checks if CloudWatch alarms have an action configured for the ALARM, INSUFFICIENT_DATA, or OK state. Optionally checks if any actions match a named ARN. The rule is NON_COMPLIANT if there is no action specified for the alarm or optional parameter.
+
+* required-tags - Checks whether your resources have the tags that you specify.
 
 
 ## Security
