@@ -14,11 +14,29 @@ folder with '_custom' at the end are ones that have been built using the AWS boi
 
 Deploy s3-impu-config-change.yaml then s3-impu-config-remediation.yaml
 
+* elb-instance-check - A Config rule that checks whether ELBs are attached to EC2 instances.
+
 ### Resources to make our own
 https://docs.aws.amazon.com/config/latest/developerguide/evaluate-config_develop-rules_python-sample.html
 https://github.com/awslabs/aws-config-rules/blob/master/python/S3_PUBLIC_ACCESS_SETTINGS_FOR_ACCOUNT/S3_PUBLIC_ACCESS_SETTINGS_FOR_ACCOUNT.PY 
 https://github.com/aws-samples/aws-custom-config-with-lambda/blob/main/aws-config-custom-rule-demo.yaml
 https://docs.aws.amazon.com/controltower/latest/controlreference/s3-rules.html#ct-s3-pr-3-description
+
+### AWS Managed Rules
+
+* cw-loggroup-retention-period-check - Checks if an Amazon CloudWatch LogGroup retention period is set to greater than 365 days or else a specified retention period. The rule is NON_COMPLIANT if the retention period is less than MinRetentionTime, if specified, or else 365 days.
+
+* eip-attached-rule - Auto remediation configuration to release unattached Elastic IPs. Detection uses a managed AWS Config Rule and remediation is with SSM Automation.
+
+* s3-version-lifecycle-policy-check  - Checks if Amazon Simple Storage Service (Amazon S3) version enabled buckets have lifecycle policy configured. The rule is NON_COMPLIANT if Amazon S3 lifecycle policy is not enabled. 
+
+* ec2-volume-inuse-check - A Config rule that checks whether EBS volumes are attached to EC2 instances. Optionally checks if EBS volumes are marked for deletion when an instance is terminated.
+
+* desired-instance-type - Checks if your EC2 instances are of a specific instance type. The rule is NON_COMPLIANT if an EC2 instance is not specified in the parameter list. For a list of supported EC2 instance types, see Instance types in the EC2 User Guide for Linux Instances.
+
+* cloudwatch-alarm-action-check - Checks if CloudWatch alarms have an action configured for the ALARM, INSUFFICIENT_DATA, or OK state. Optionally checks if any actions match a named ARN. The rule is NON_COMPLIANT if there is no action specified for the alarm or optional parameter.
+
+* required-tags - Checks whether your resources have the tags that you specify.
 
 
 ## Security
